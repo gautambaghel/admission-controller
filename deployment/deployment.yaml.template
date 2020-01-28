@@ -15,12 +15,9 @@ spec:
       labels:
         app: webhook-server
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1234
       containers:
       - name: server
-        image: stackrox/admission-controller-webhook-demo:latest
+        image: gautambaghel/art-ac:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8443

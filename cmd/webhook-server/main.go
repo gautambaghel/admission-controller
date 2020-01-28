@@ -17,14 +17,17 @@ limitations under the License.
 package main
 
 import (
-	"errors"
+	"crypto/tls"
+	"encoding/json"
 	"fmt"
-	"k8s.io/api/admission/v1beta1"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
+
+	"k8s.io/api/admission/v1beta1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -51,7 +54,7 @@ func applySecurityDefaults(req *v1beta1.AdmissionRequest) ([]patchOperation, err
 	// However, if (for whatever reason) this gets invoked on an object of a different kind, issue a log message but
 	// let the object request pass through otherwise.
 	if req.Resource != podResource {
-		log.Printf("expect resource to be %s", podResource)
+		log.Println("expect resource to be %s", podResource)
 		return nil, nil
 	}
 
@@ -63,35 +66,69 @@ func applySecurityDefaults(req *v1beta1.AdmissionRequest) ([]patchOperation, err
 	}
 
 	// Retrieve the `runAsNonRoot` and `runAsUser` values.
-	var runAsNonRoot *bool
-	var runAsUser *int64
-	if pod.Spec.SecurityContext != nil {
-		runAsNonRoot = pod.Spec.SecurityContext.RunAsNonRoot
-		runAsUser = pod.Spec.SecurityContext.RunAsUser
+	// var runAsNonRoot *bool
+	// var runAsUser *int64
+	// if pod.Spec.SecurityContext != nil {
+	// 	runAsNonRoot = pod.Spec.SecurityContext.RunAsNonRoot
+	// 	runAsUser = pod.Spec.SecurityContext.RunAsUser
+	// }
+	cred := &RegistryAuth{
+		URL:      "salesaf.blackducksoftware.com",
+		User:     "gautamb",
+		Password: "",
+	}
+
+	fmt.Println("AC webhook: ", pod.Spec.Containers[0].Image)
+	image := pod.Spec.Containers[0].Image
+	imageSplit := strings.Split(image, ":")
+
+	imageName := imageSplit[0]
+	imageVersion := "latest"
+	if len(imageSplit) > 1 {
+		imageVersion = imageSplit[1]
+	}
+
+	artStatus := &ArtStatus{}
+	url := fmt.Sprintf("https://%s/artifactory/api/storage/%s/%s/%s?properties=blackduck.overallStatus", cred.URL, "docker-local", imageName, imageVersion)
+	fmt.Println("AC webhook: url~> ", url)
+
+	err := GetResourceOfType(url, cred, artStatus)
+	if err != nil {
+		fmt.Println("AC webhook: Error: ", imageName, ":", imageVersion, " ", err)
+	} else {
+		fmt.Println("AC webhook: image", imageName, ":", imageVersion, " is an artifactory image")
+		for _, violation := range artStatus.Properties.BlackduckOverallStatus {
+			fmt.Println("AC webhook: violation status ~> ", violation)
+			if violation == "IN_VIOLATION" {
+				return nil, fmt.Errorf("AC webhook: Black Duck policy violation for the image %s:%s", imageName, imageVersion)
+			}
+		}
+
+		fmt.Println("AC webhook: Artifactory image ", imageName, ":", imageVersion, "not in Black Duck status violation")
 	}
 
 	// Create patch operations to apply sensible defaults, if those options are not set explicitly.
 	var patches []patchOperation
-	if runAsNonRoot == nil {
-		patches = append(patches, patchOperation{
-			Op:    "add",
-			Path:  "/spec/securityContext/runAsNonRoot",
-			// The value must not be true if runAsUser is set to 0, as otherwise we would create a conflicting
-			// configuration ourselves.
-			Value: runAsUser == nil || *runAsUser != 0,
-		})
+	// if runAsNonRoot == nil {
+	// 	patches = append(patches, patchOperation{
+	// 		Op:   "add",
+	// 		Path: "/spec/securityContext/runAsNonRoot",
+	// 		// The value must not be true if runAsUser is set to 0, as otherwise we would create a conflicting
+	// 		// configuration ourselves.
+	// 		Value: runAsUser == nil || *runAsUser != 0,
+	// 	})
 
-		if runAsUser == nil {
-			patches = append(patches, patchOperation{
-				Op:    "add",
-				Path:  "/spec/securityContext/runAsUser",
-				Value: 1234,
-			})
-		}
-	} else if *runAsNonRoot == true && (runAsUser != nil && *runAsUser == 0) {
-		// Make sure that the settings are not contradictory, and fail the object creation if they are.
-		return nil, errors.New("runAsNonRoot specified, but runAsUser set to 0 (the root user)")
-	}
+	// 	if runAsUser == nil {
+	// 		patches = append(patches, patchOperation{
+	// 			Op:    "add",
+	// 			Path:  "/spec/securityContext/runAsUser",
+	// 			Value: 1234,
+	// 		})
+	// 	}
+	// } else if *runAsNonRoot == true && (runAsUser != nil && *runAsUser == 0) {
+	// 	// Make sure that the settings are not contradictory, and fail the object creation if they are.
+	// 	return nil, errors.New("runAsNonRoot specified, but runAsUser set to 0 (the root user)")
+	// }
 
 	return patches, nil
 }
@@ -109,4 +146,53 @@ func main() {
 		Handler: mux,
 	}
 	log.Fatal(server.ListenAndServeTLS(certPath, keyPath))
+}
+
+// GetResourceOfType takes in the specified URL with credentials and
+// tries to decode returning json to specified interface
+func GetResourceOfType(url string, cred *RegistryAuth, target interface{}) error {
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	client := &http.Client{Transport: tr}
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("Error in creating get request %e at url %s", err, url)
+	}
+
+	if cred != nil {
+		req.SetBasicAuth(cred.User, cred.Password)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+	return json.NewDecoder(resp.Body).Decode(target)
+}
+
+// RegistryAuth stores the credentials for a private docker repo
+// and is same as common.RegistryAuth in perceptor-scanner repo
+type RegistryAuth struct {
+	URL      string
+	User     string
+	Password string
+	Token    string
+}
+
+// ArtImageSHAs gets all the sha256 of an image
+type ArtImageSHAs struct {
+	Properties struct {
+		Sha256 []string `json:"sha256"`
+	} `json:"properties"`
+	URI string `json:"uri"`
+}
+
+// ArtStatus gets status violation policy
+type ArtStatus struct {
+	Properties struct {
+		BlackduckOverallStatus []string `json:"blackduck.overallStatus"`
+	} `json:"properties"`
+	URI string `json:"uri"`
 }
