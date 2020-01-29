@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Copyright (c) 2020 Synopsys, Inc.
+
+# Added API calls to artifactory to test policy violations
+
 # Copyright (c) 2019 StackRox Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");

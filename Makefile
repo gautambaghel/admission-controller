@@ -1,3 +1,7 @@
+# Copyright (c) 2020 Synopsys, Inc.
+#
+# Added API calls to artifactory to test policy violations
+#
 # Copyright (c) 2019 StackRox Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,7 +20,7 @@
 
 .DEFAULT_GOAL := docker-image
 
-IMAGE ?= stackrox/admission-controller-webhook-demo:latest
+IMAGE ?= gautambaghel/art-ac:latest
 
 image/webhook-server: $(shell find . -name '*.go')
 	CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o $@ ./cmd/webhook-server
