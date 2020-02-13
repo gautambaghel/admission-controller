@@ -22,12 +22,19 @@ flag of `kube-apiserver`.
 
 For building the image, [GNU make](https://www.gnu.org/software/make/) and [Go](https://golang.org) are required.
 
-## Deploying the Webhook Server
+## Deploying the Artifactory Webhook Server
 
 1. Bring up a Kubernetes cluster satisfying the above prerequisites, and make
 sure it is active (i.e., either via the configuration in the default location, or by setting
 the `KUBECONFIG` environment variable).
-2. Run `./deploy.sh`. This will create a CA, a certificate and private key for the webhook server,
+
+2. Change the artifactory credentials in `cmd/webhook-server/main.go` to your own. (Don't commit it)
+
+3. Change the docker image "gautambaghel/art-ac:latest" in `auto.sh` with your own docker username and image name
+
+4. Use the docker username and image in the `deployment/deployment.yaml.template` file and replace "gautambaghel/art-ac:latest"
+
+5. Run `./auto.sh`. This will create a new go binary based on Artifactory Creds and deploy it to the image mentioned in the steps aboev it will also create a CA, a certificate and private key for the webhook server,
 and deploy the resources in the newly created `webhook-demo` namespace in your Kubernetes cluster.
 
 
