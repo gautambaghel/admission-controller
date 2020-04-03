@@ -12,3 +12,8 @@ spec:
   containers:
     - name: busybox
       image: quay.io/opssighttestorg/busybox:latest
+      command: ["sleep", "3600"]
+      resources:
+        limits:
+          memory: "64Mi"
+          cpu: "250m"

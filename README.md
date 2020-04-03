@@ -1,10 +1,10 @@
-# Kubernetes Admission Controller for Black Duck in Artifactory
+# Kubernetes Admission Controller for Black Duck in Quay
 
 This repository contains a small HTTP server that can be used as a Kubernetes
 [MutatingAdmissionWebhook](https://kubernetes.io/docs/admin/admission-controllers/#mutatingadmissionwebhook-beta-in-19).
 
 The logic of this demo webhook is fairly simple: it enforces more secure defaults for running
-containers if a Black Duck policy violation is present in an artifactory image. It's possible to run an artifactory image
+containers if a Black Duck policy violation is present in an quay image. It's possible to run an quay image
 only if it's not in a Black Duck policy violation.
 
 ## Prerequisites
@@ -30,7 +30,6 @@ the `KUBECONFIG` environment variable).
 2. Run `./deploy.sh`. This will create a CA, a certificate and private key for the webhook server,
 and deploy the resources in the newly created `webhook-demo` namespace in your Kubernetes cluster.
 
-
 ## Verify
 
 1. The `webhook-server` pod in the `webhook-demo` namespace should be running:
@@ -49,14 +48,14 @@ NAME           AGE
 demo-webhook   36m
 ```
 
-3. Deploy [a pod](examples/pod-with-defaults.yaml) that is in your artifactory instance with either blackduck.overallStatus not set or set to "NOT_IN_VIOLATION":
+3. Deploy [a pod](examples/pod-with-defaults.yaml) that is in your quay instance with either blackduck.overallStatus not set or set to "NOT_IN_VIOLATION":
 
 ```
 $ kubectl create -f examples/pod-with-defaults.yaml
 $ pod/pod-with-defaults created
 ```
 
-4. Attempt to deploy [a pod](examples/pod-with-conflict.yaml) that is in your artifactory instance with blackduck.overallStatus set to "IN_VIOLATION":
+4. Attempt to deploy [a pod](examples/pod-with-conflict.yaml) that is in your quay instance with blackduck.overallStatus set to "IN_VIOLATION":
 
 ```
 $ kubectl create -f examples/pod-with-conflict.yaml
@@ -72,4 +71,3 @@ If you want to modify the webhook server for testing purposes, be sure to set an
 the shell environment variable `IMAGE` to an image tag for which you have push access. You can then
 build and push the image by running `make push-image`. Also make sure to change the image tag
 in `deployment/deployment.yaml.template`, and if necessary, add image pull secrets.
-

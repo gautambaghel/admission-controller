@@ -170,6 +170,7 @@ func GetResourceOfType(url string, quayToken string, target interface{}) error {
 	return json.NewDecoder(resp.Body).Decode(target)
 }
 
+// QuayLabels contains array of labels for an image version
 type QuayLabels struct {
 	Labels []struct {
 		Value      string `json:"value"`

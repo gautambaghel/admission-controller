@@ -18,3 +18,8 @@ spec:
   containers:
     - name: ducky-crm
       image: quay.io/opssighttestorg/ducky-crm:latest
+      command: ["sleep", "3600"]
+      resources:
+        limits:
+          memory: "64Mi"
+          cpu: "250m"
