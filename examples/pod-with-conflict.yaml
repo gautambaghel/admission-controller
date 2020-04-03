@@ -16,6 +16,5 @@ spec:
     runAsNonRoot: true
     runAsUser: 0
   containers:
-    - name: busybox
-      image: busybox
-      command: ["sh", "-c", "echo I am running as user $(id -u)"]
+    - name: ducky-crm
+      image: quay.io/opssighttestorg/ducky-crm:latest

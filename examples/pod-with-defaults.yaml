@@ -11,5 +11,4 @@ spec:
   restartPolicy: OnFailure
   containers:
     - name: busybox
-      image: busybox
-      command: ["sh", "-c", "echo I am running as user $(id -u)"]
+      image: quay.io/opssighttestorg/busybox:latest

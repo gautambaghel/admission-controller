@@ -1,7 +1,7 @@
 /*
 Copyright (c) 2020 Synopsys, Inc.
 
-Added API calls to artifactory to test policy violations
+Added API calls to quay to test policy violations
 
 Copyright (c) 2019 StackRox Inc.
 
@@ -76,64 +76,58 @@ func applySecurityDefaults(req *v1beta1.AdmissionRequest) ([]patchOperation, err
 	// 	runAsNonRoot = pod.Spec.SecurityContext.RunAsNonRoot
 	// 	runAsUser = pod.Spec.SecurityContext.RunAsUser
 	// }
-	cred := &RegistryAuth{
-		URL:      "salesaf.blackducksoftware.com",
-		User:     "gautamb",
-		Password: "",
-	}
+
+	quayToken := "" // Get this from Quay UI here -> https://docs.quay.io/api/
 
 	fmt.Println("AC webhook: ", pod.Spec.Containers[0].Image)
 	image := pod.Spec.Containers[0].Image
 	imageSplit := strings.Split(image, ":")
 
-	imageName := imageSplit[0]
-	imageVersion := "latest"
-	if len(imageSplit) > 1 {
-		imageVersion = imageSplit[1]
-	}
+	imageNameSplit := strings.Split(imageSplit[0], "/")
+	repoName := imageNameSplit[0]
+	orgName := imageNameSplit[1]
+	imageName := imageNameSplit[2]
+	imageVersion := imageSplit[1]
 
-	artStatus := &ArtStatus{}
-	url := fmt.Sprintf("https://%s/artifactory/api/storage/%s/%s/%s?properties=blackduck.overallStatus", cred.URL, "docker-local", imageName, imageVersion)
-	fmt.Println("AC webhook: url~> ", url)
+	fmt.Println(repoName)
+	fmt.Println(orgName)
+	fmt.Println(imageName)
 
-	err := GetResourceOfType(url, cred, artStatus)
+	url := fmt.Sprintf("http://%s/api/v1/repository/%s/%s/tag?onlyActiveTags=true", repoName, orgName, imageName)
+	fmt.Println("AC webhook: looking for SHAs ~> ", url)
+
+	tagDigest := &QuayTagDigest{}
+	err := GetResourceOfType(url, quayToken, tagDigest)
 	if err != nil {
-		fmt.Println("AC webhook: Error: ", imageName, ":", imageVersion, " ", err)
+		fmt.Errorf("AC webhook: Error in getting docker repo: %+v", err)
 	} else {
-		fmt.Println("AC webhook: image", imageName, ":", imageVersion, " is an artifactory image")
-		for _, violation := range artStatus.Properties.BlackduckOverallStatus {
-			fmt.Println("AC webhook: violation status ~> ", violation)
-			if violation == "IN_VIOLATION" {
-				return nil, fmt.Errorf("AC webhook: Black Duck policy violation for the image %s:%s", imageName, imageVersion)
+		for _, tagInfo := range tagDigest.Tags {
+			if tagInfo.Name == imageVersion {
+				sha := strings.Replace(tagInfo.ManifestDigest, "sha256:", "", -1)
+				url = fmt.Sprintf("https://%s/api/v1/repository/%s/%s/manifest/sha256:%s/labels", repoName, orgName, imageName, sha)
+				fmt.Println("AC webhook: url ~> ", url)
+
+				labels := &QuayLabels{}
+				err := GetResourceOfType(url, quayToken, labels)
+				if err != nil {
+					fmt.Println("AC webhook: Error: ", imageName, ":", sha, " ", err)
+				} else {
+					fmt.Println("AC webhook: image", imageName, ":", sha, " is an quay image")
+					for _, label := range labels.Labels {
+						if label.Key == "blackduck.overallstatus" {
+							fmt.Println("AC webhook: violation status ~> ", label.Value)
+							if label.Value == "IN_VIOLATION" {
+								return nil, fmt.Errorf("AC webhook: cannot deploy image ~> Black Duck policy violation in image %s:%s sha256:%s", imageName, tagInfo.Name, sha)
+							}
+						}
+					}
+				}
 			}
 		}
-
-		fmt.Println("AC webhook: Artifactory image ", imageName, ":", imageVersion, "not in Black Duck status violation")
 	}
 
 	// Create patch operations to apply sensible defaults, if those options are not set explicitly.
 	var patches []patchOperation
-	// if runAsNonRoot == nil {
-	// 	patches = append(patches, patchOperation{
-	// 		Op:   "add",
-	// 		Path: "/spec/securityContext/runAsNonRoot",
-	// 		// The value must not be true if runAsUser is set to 0, as otherwise we would create a conflicting
-	// 		// configuration ourselves.
-	// 		Value: runAsUser == nil || *runAsUser != 0,
-	// 	})
-
-	// 	if runAsUser == nil {
-	// 		patches = append(patches, patchOperation{
-	// 			Op:    "add",
-	// 			Path:  "/spec/securityContext/runAsUser",
-	// 			Value: 1234,
-	// 		})
-	// 	}
-	// } else if *runAsNonRoot == true && (runAsUser != nil && *runAsUser == 0) {
-	// 	// Make sure that the settings are not contradictory, and fail the object creation if they are.
-	// 	return nil, errors.New("runAsNonRoot specified, but runAsUser set to 0 (the root user)")
-	// }
-
 	return patches, nil
 }
 
@@ -154,7 +148,7 @@ func main() {
 
 // GetResourceOfType takes in the specified URL with credentials and
 // tries to decode returning json to specified interface
-func GetResourceOfType(url string, cred *RegistryAuth, target interface{}) error {
+func GetResourceOfType(url string, quayToken string, target interface{}) error {
 	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	client := &http.Client{Transport: tr}
 
@@ -163,40 +157,42 @@ func GetResourceOfType(url string, cred *RegistryAuth, target interface{}) error
 		return fmt.Errorf("Error in creating get request %e at url %s", err, url)
 	}
 
-	if cred != nil {
-		req.SetBasicAuth(cred.User, cred.Password)
+	if len(quayToken) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+quayToken)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
-
 	defer resp.Body.Close()
 	return json.NewDecoder(resp.Body).Decode(target)
 }
 
-// RegistryAuth stores the credentials for a private docker repo
-// and is same as common.RegistryAuth in perceptor-scanner repo
-type RegistryAuth struct {
-	URL      string
-	User     string
-	Password string
-	Token    string
+type QuayLabels struct {
+	Labels []struct {
+		Value      string `json:"value"`
+		MediaType  string `json:"media_type"`
+		ID         string `json:"id"`
+		Key        string `json:"key"`
+		SourceType string `json:"source_type"`
+	} `json:"labels"`
 }
 
-// ArtImageSHAs gets all the sha256 of an image
-type ArtImageSHAs struct {
-	Properties struct {
-		Sha256 []string `json:"sha256"`
-	} `json:"properties"`
-	URI string `json:"uri"`
-}
-
-// ArtStatus gets status violation policy
-type ArtStatus struct {
-	Properties struct {
-		BlackduckOverallStatus []string `json:"blackduck.overallStatus"`
-	} `json:"properties"`
-	URI string `json:"uri"`
+// QuayTagDigest contains Digest for a particular Quay image
+type QuayTagDigest struct {
+	HasAdditional bool `json:"has_additional"`
+	Page          int  `json:"page"`
+	Tags          []struct {
+		Name           string `json:"name"`
+		Reversion      bool   `json:"reversion"`
+		StartTs        int    `json:"start_ts"`
+		ImageID        string `json:"image_id"`
+		LastModified   string `json:"last_modified"`
+		ManifestDigest string `json:"manifest_digest"`
+		DockerImageID  string `json:"docker_image_id"`
+		IsManifestList bool   `json:"is_manifest_list"`
+		Size           int    `json:"size"`
+	} `json:"tags"`
 }

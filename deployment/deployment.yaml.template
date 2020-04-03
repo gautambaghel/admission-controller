@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: server
-        image: gautambaghel/art-ac:latest
+        image: gautambaghel/quay-ac:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8443

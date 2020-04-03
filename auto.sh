@@ -14,9 +14,9 @@ kubectl delete MutatingWebhookconfiguration demo-webhook
 
 cd image/
 
-docker build -t gautambaghel/art-ac:latest .
+docker build -t gautambaghel/quay-ac:latest .
 
-docker push gautambaghel/art-ac:latest
+docker push gautambaghel/quay-ac:latest
 
 cd ..
 
